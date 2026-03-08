@@ -3,15 +3,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 
+type Step = { dia: number; acao: string }
+
 type Workflow = {
   id: string
   name: string
   active: boolean
-  steps: { dia: number; acao: string }[]
+  steps: Step[]
   created_at: string
 }
 
-// Workflows padrao para inserir se o banco estiver vazio
 const defaultWorkflows = [
   {
     name: 'Boas-vindas Neuropatia',
@@ -44,6 +45,12 @@ export default function AutomacaoPage() {
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
 
+  // Estado do modal de edicao
+  const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editSteps, setEditSteps] = useState<Step[]>([])
+  const [saving, setSaving] = useState(false)
+
   const fetchWorkflows = useCallback(async () => {
     setLoading(true)
     try {
@@ -51,7 +58,6 @@ export default function AutomacaoPage() {
       if (res.ok) {
         const data = await res.json()
         if (data.length === 0) {
-          // Cria workflows padrao se nao existirem
           await seedWorkflows()
           return
         }
@@ -73,7 +79,6 @@ export default function AutomacaoPage() {
           body: JSON.stringify(wf),
         })
       }
-      // Busca novamente depois de criar
       const res = await fetch('/api/workflows')
       if (res.ok) {
         setWorkflows(await res.json())
@@ -118,6 +123,69 @@ export default function AutomacaoPage() {
       }
     } catch (err) {
       console.error('Erro ao deletar workflow:', err)
+    }
+  }
+
+  // Abre o modal de edicao com os dados do workflow
+  function openEditModal(wf: Workflow) {
+    setEditingWorkflow(wf)
+    setEditName(wf.name)
+    setEditSteps(wf.steps.map(s => ({ ...s })))
+  }
+
+  // Fecha o modal
+  function closeEditModal() {
+    setEditingWorkflow(null)
+    setEditName('')
+    setEditSteps([])
+  }
+
+  // Atualiza um campo de um step
+  function updateStep(index: number, field: 'dia' | 'acao', value: string | number) {
+    setEditSteps(prev => prev.map((s, i) =>
+      i === index ? { ...s, [field]: value } : s
+    ))
+  }
+
+  // Adiciona novo step
+  function addStep() {
+    const lastDia = editSteps.length > 0 ? editSteps[editSteps.length - 1].dia : 0
+    setEditSteps(prev => [...prev, { dia: lastDia + 1, acao: '' }])
+  }
+
+  // Remove um step
+  function removeStep(index: number) {
+    if (editSteps.length <= 1) return alert('O workflow precisa ter pelo menos 1 etapa.')
+    setEditSteps(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // Salva as alteracoes
+  async function saveEdit() {
+    if (!editingWorkflow) return
+    if (!editName.trim()) return alert('Digite um nome para o workflow.')
+    if (editSteps.some(s => !s.acao.trim())) return alert('Preencha todas as acoes.')
+
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/workflows/${editingWorkflow.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          steps: editSteps.map(s => ({ dia: Number(s.dia), acao: s.acao.trim() })),
+        }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setWorkflows(prev =>
+          prev.map(wf => wf.id === updated.id ? updated : wf)
+        )
+        closeEditModal()
+      }
+    } catch (err) {
+      console.error('Erro ao salvar workflow:', err)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -177,6 +245,13 @@ export default function AutomacaoPage() {
                 </span>
               </div>
               <div className="flex items-center gap-3">
+                {/* Botao Editar */}
+                <button
+                  onClick={() => openEditModal(wf)}
+                  className="text-blue-500 hover:text-blue-700 text-sm cursor-pointer"
+                >
+                  Editar
+                </button>
                 {/* Toggle switch */}
                 <button
                   onClick={() => toggleWorkflow(wf.id, wf.active)}
@@ -202,7 +277,7 @@ export default function AutomacaoPage() {
 
             {/* Steps */}
             <div className="space-y-2">
-              {(wf.steps as { dia: number; acao: string }[]).map((step, i) => (
+              {(wf.steps as Step[]).map((step, i) => (
                 <div key={i} className="flex items-center gap-3 text-sm">
                   <span className="w-16 text-gray-400 shrink-0">Dia {step.dia}</span>
                   <span
@@ -225,6 +300,100 @@ export default function AutomacaoPage() {
           </div>
         ))}
       </div>
+
+      {/* Modal de Edicao */}
+      {editingWorkflow && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Editar Workflow</h3>
+              <button
+                onClick={closeEditModal}
+                className="text-gray-400 hover:text-gray-600 text-xl cursor-pointer"
+              >
+                x
+              </button>
+            </div>
+
+            {/* Nome do workflow */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Nome do Workflow
+              </label>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Ex: Boas-vindas Neuropatia"
+              />
+            </div>
+
+            {/* Etapas */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Etapas do Workflow
+              </label>
+              <div className="space-y-3">
+                {editSteps.map((step, i) => (
+                  <div key={i} className="flex items-start gap-2 bg-gray-50 p-3 rounded-lg">
+                    <div className="shrink-0">
+                      <label className="block text-xs text-gray-500 mb-1">Dia</label>
+                      <input
+                        type="number"
+                        value={step.dia}
+                        onChange={(e) => updateStep(i, 'dia', parseInt(e.target.value) || 0)}
+                        className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        min="1"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-xs text-gray-500 mb-1">Acao</label>
+                      <input
+                        type="text"
+                        value={step.acao}
+                        onChange={(e) => updateStep(i, 'acao', e.target.value)}
+                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="O que enviar neste dia..."
+                      />
+                    </div>
+                    <button
+                      onClick={() => removeStep(i)}
+                      className="mt-5 text-red-400 hover:text-red-600 text-sm cursor-pointer shrink-0"
+                      title="Remover etapa"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={addStep}
+                className="mt-3 px-3 py-1.5 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 cursor-pointer"
+              >
+                + Adicionar etapa
+              </button>
+            </div>
+
+            {/* Botoes */}
+            <div className="flex gap-2 pt-2 border-t">
+              <button
+                onClick={closeEditModal}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={saving}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+              >
+                {saving ? 'Salvando...' : 'Salvar Alteracoes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
