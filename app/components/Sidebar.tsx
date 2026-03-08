@@ -15,7 +15,9 @@ export default function Sidebar() {
 
   return (
     <nav className="w-56 bg-gray-900 text-white p-4 flex flex-col gap-1 shrink-0">
-      <h1 className="text-lg font-bold mb-6 px-3">🎯 Prospect Hunter</h1>
+      <Link href="/" className="text-lg font-bold mb-6 px-3 hover:text-blue-400 transition-colors">
+        🚀 O Caminho do Afiliado
+      </Link>
       {menuItems.map((item) => {
         const isActive = pathname === item.href
         return (
