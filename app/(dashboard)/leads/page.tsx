@@ -203,8 +203,8 @@ export default function LeadsPage() {
       </div>
 
       {/* Tabela */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-x-auto">
+        <table className="w-full text-sm min-w-[700px]">
           <thead className="bg-gray-50 border-b">
             <tr>
               <th className="text-left p-3 font-medium">Nome</th>
