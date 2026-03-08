@@ -17,7 +17,11 @@ export async function POST(request: NextRequest) {
   try {
     // 1. Busca o conteudo da pagina
     const pageRes = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ProspectHunter/1.0)' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+      },
     })
 
     if (!pageRes.ok) {
@@ -26,73 +30,153 @@ export async function POST(request: NextRequest) {
 
     const html = await pageRes.text()
 
-    // Remove tags de script e style pra pegar so o texto visivel
+    // Extrai informacoes estruturadas do HTML
+    // Meta tags (titulo, descricao, og tags)
+    const metaTitle = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() || ''
+    const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/i)?.[1] || ''
+    const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([\s\S]*?)["']/i)?.[1] || ''
+    const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/i)?.[1] || ''
+
+    // Extrai textos de headings
+    const headings = [...html.matchAll(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi)]
+      .map(m => m[1].replace(/<[^>]+>/g, '').trim())
+      .filter(h => h.length > 0)
+
+    // Extrai textos de botoes e CTAs
+    const buttons = [...html.matchAll(/<(?:button|a)[^>]*>([\s\S]*?)<\/(?:button|a)>/gi)]
+      .map(m => m[1].replace(/<[^>]+>/g, '').trim())
+      .filter(b => b.length > 2 && b.length < 100)
+
+    // Extrai textos de paragrafos
+    const paragraphs = [...html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+      .map(m => m[1].replace(/<[^>]+>/g, '').trim())
+      .filter(p => p.length > 10)
+
+    // Extrai alt de imagens
+    const imageAlts = [...html.matchAll(/<img[^>]*alt=["']([\s\S]*?)["'][^>]*>/gi)]
+      .map(m => m[1].trim())
+      .filter(a => a.length > 0)
+
+    // Extrai listas
+    const listItems = [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+      .map(m => m[1].replace(/<[^>]+>/g, '').trim())
+      .filter(l => l.length > 3)
+
+    // Extrai textos de spans e divs com conteudo relevante
+    const spans = [...html.matchAll(/<(?:span|strong|em|b)[^>]*>([\s\S]*?)<\/(?:span|strong|em|b)>/gi)]
+      .map(m => m[1].replace(/<[^>]+>/g, '').trim())
+      .filter(s => s.length > 5 && s.length < 200)
+
+    // Texto limpo geral (fallback)
     const cleanText = html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 8000) // Limita pra nao estourar o contexto da IA
 
-    if (cleanText.length < 50) {
-      return NextResponse.json({ error: 'A pagina parece estar vazia ou bloqueou o acesso' }, { status: 400 })
+    // Monta um resumo estruturado da pagina
+    const pageAnalysis = `
+=== META INFORMACOES ===
+Titulo da pagina: ${metaTitle}
+Meta descricao: ${metaDesc}
+OG Title: ${ogTitle}
+OG Description: ${ogDesc}
+
+=== TITULOS E HEADLINES (${headings.length} encontrados) ===
+${headings.slice(0, 20).map((h, i) => `${i + 1}. ${h}`).join('\n')}
+
+=== BOTOES E CTAs (${buttons.length} encontrados) ===
+${[...new Set(buttons)].slice(0, 15).map((b, i) => `${i + 1}. ${b}`).join('\n')}
+
+=== PARAGRAFOS PRINCIPAIS (${paragraphs.length} encontrados) ===
+${paragraphs.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join('\n')}
+
+=== ITENS DE LISTA (${listItems.length} encontrados) ===
+${listItems.slice(0, 15).map((l, i) => `${i + 1}. ${l}`).join('\n')}
+
+=== DESTAQUES (textos em negrito/enfase) ===
+${[...new Set(spans)].slice(0, 15).map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+=== IMAGENS (${imageAlts.length} com descricao) ===
+${imageAlts.slice(0, 10).map((a, i) => `${i + 1}. ${a}`).join('\n')}
+
+=== TEXTO GERAL DA PAGINA (primeiros 5000 caracteres) ===
+${cleanText.slice(0, 5000)}
+`.trim()
+
+    // Verifica se tem conteudo suficiente
+    if (cleanText.length < 30 && headings.length === 0) {
+      return NextResponse.json({
+        error: 'A pagina parece estar vazia ou carrega o conteudo por JavaScript. Tente uma pagina que nao dependa de JavaScript para carregar (paginas estaticas, WordPress, landing pages do Elementor, etc.)'
+      }, { status: 400 })
     }
 
     // 2. Envia pra Gemini analisar
-    const prompt = `Voce e um especialista em neuromarketing e copywriting. Analise o conteudo desta landing page/pagina de vendas e de uma avaliacao detalhada.
+    const prompt = `Voce e um dos maiores especialistas do mundo em neuromarketing, copywriting e otimizacao de conversao (CRO). Voce vai analisar uma landing page/pagina de vendas de um afiliado digital brasileiro.
 
-CONTEUDO DA PAGINA:
-${cleanText}
+IMPORTANTE: Analise TODOS os elementos abaixo com profundidade. Seja especifico nos feedbacks - cite trechos exatos da pagina. Nao seja generico.
 
-Responda EXATAMENTE neste formato JSON (sem markdown, sem texto extra, APENAS o JSON):
+CONTEUDO EXTRAIDO DA PAGINA (URL: ${url}):
+${pageAnalysis}
+
+INSTRUCOES DE ANALISE:
+- Avalie cada categoria considerando as melhores praticas de neuromarketing
+- Cite trechos especificos da pagina nos feedbacks (entre aspas)
+- Seja critico mas construtivo - aponte o que esta BOM e o que precisa MELHORAR
+- As melhorias devem ser acoes concretas e praticas que o afiliado pode implementar hoje
+- Considere que o publico e brasileiro
+
+Responda EXATAMENTE neste formato JSON (sem markdown, sem texto extra, APENAS o JSON puro):
 {
   "score": <numero de 0 a 100>,
   "nivel": "<Excelente|Bom|Regular|Fraco|Critico>",
-  "resumo": "<resumo em 1-2 frases da analise geral>",
+  "resumo": "<resumo em 2-3 frases da analise geral, citando pontos fortes e fracos>",
   "categorias": [
     {
-      "nome": "Headline/Titulo",
+      "nome": "Headline/Titulo Principal",
       "score": <0-100>,
-      "feedback": "<o que esta bom ou ruim no titulo>"
+      "feedback": "<analise do titulo principal: clareza, impacto emocional, especificidade. Cite o titulo encontrado.>"
     },
     {
       "nome": "Gatilhos Mentais",
       "score": <0-100>,
-      "feedback": "<urgencia, escassez, prova social, autoridade, reciprocidade - quais tem e quais faltam>"
+      "feedback": "<quais gatilhos estao presentes (urgencia, escassez, prova social, autoridade, reciprocidade, novidade, especificidade) e quais estao faltando. Cite exemplos encontrados na pagina.>"
     },
     {
       "nome": "Clareza da Oferta",
       "score": <0-100>,
-      "feedback": "<esta claro o que a pessoa ganha? o beneficio esta explicito?>"
+      "feedback": "<esta claro O QUE a pessoa recebe, COMO funciona e QUAL o beneficio principal? O visitante entende em 5 segundos?>"
     },
     {
       "nome": "Call-to-Action (CTA)",
       "score": <0-100>,
-      "feedback": "<os botoes/links de acao sao claros e persuasivos?>"
+      "feedback": "<analise dos botoes/links de acao: texto usado, posicionamento, quantidade, urgencia. Cite os CTAs encontrados.>"
     },
     {
       "nome": "Prova Social",
       "score": <0-100>,
-      "feedback": "<depoimentos, numeros, logos de empresas, resultados?>"
+      "feedback": "<depoimentos, numeros, logos, resultados, quantidade de clientes/usuarios mencionados. Cite os que encontrou.>"
     },
     {
-      "nome": "Emocao e Conexao",
+      "nome": "Conexao Emocional",
       "score": <0-100>,
-      "feedback": "<a pagina conecta emocionalmente com a dor/desejo do publico?>"
+      "feedback": "<a pagina identifica a DOR do publico? Mostra EMPATIA? Cria DESEJO pela solucao? Usa storytelling?>"
     },
     {
-      "nome": "Escaneabilidade",
+      "nome": "Estrutura e Escaneabilidade",
       "score": <0-100>,
-      "feedback": "<facil de ler rapido? tem subtitulos, bullets, espacamento?>"
+      "feedback": "<hierarquia visual, uso de subtitulos, bullets, espacamento, facilidade de leitura rapida, fluxo logico da pagina>"
     }
   ],
   "melhorias": [
-    "<melhoria especifica 1>",
-    "<melhoria especifica 2>",
-    "<melhoria especifica 3>",
-    "<melhoria especifica 4>",
-    "<melhoria especifica 5>"
+    "<melhoria concreta e especifica 1 - o que mudar e como>",
+    "<melhoria concreta e especifica 2>",
+    "<melhoria concreta e especifica 3>",
+    "<melhoria concreta e especifica 4>",
+    "<melhoria concreta e especifica 5>",
+    "<melhoria concreta e especifica 6>",
+    "<melhoria concreta e especifica 7>"
   ]
 }`
 
@@ -104,8 +188,8 @@ Responda EXATAMENTE neste formato JSON (sem markdown, sem texto extra, APENAS o 
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 2000,
+            temperature: 0.4,
+            maxOutputTokens: 4000,
           },
         }),
       }
@@ -127,7 +211,7 @@ Responda EXATAMENTE neste formato JSON (sem markdown, sem texto extra, APENAS o 
       return NextResponse.json(analysis)
     } catch {
       return NextResponse.json({
-        error: 'A IA retornou um formato inesperado',
+        error: 'A IA retornou um formato inesperado. Tente novamente.',
         raw: responseText,
       }, { status: 500 })
     }
