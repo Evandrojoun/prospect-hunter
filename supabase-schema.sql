@@ -13,6 +13,7 @@ CREATE TABLE leads (
   classification TEXT,                  -- hot, warm, cold
   meta_campaign_id TEXT,                -- ID da campanha Meta de origem
   meta_ad_id TEXT,                      -- ID do anuncio Meta
+  meta_lead_id TEXT,                    -- ID do lead no Meta (evita duplicatas)
   notes TEXT,                           -- observacoes livres
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
